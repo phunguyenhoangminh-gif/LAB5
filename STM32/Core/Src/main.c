@@ -81,11 +81,18 @@ enum UART_STATE uart_state = UART_IDLE;
 
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
     if (huart->Instance == USART2) {
-    	buffer[index_buffer++] = temp;
-    	if (index_buffer == MAX_BUFFER_SIZE) index_buffer = 0;
-    	buffer_flag = 1;
-    	HAL_UART_Transmit(&huart2, &temp, 1, 50);
-    	HAL_UART_Receive_IT(&huart2, &temp, 1);
+        // Mã ASCII của Backspace thường là 8 (\b) hoặc 127 (DEL)
+        if (temp == 8 || temp == 127) {
+            uint8_t backspace_seq[] = "\b \b";
+            HAL_UART_Transmit(&huart2, backspace_seq, 3, 10);
+        } else {
+            HAL_UART_Transmit(&huart2, &temp, 1, 10);
+        }
+        buffer[index_buffer++] = temp;
+        if (index_buffer == MAX_BUFFER_SIZE) index_buffer = 0;
+
+        buffer_flag = 1;
+        HAL_UART_Receive_IT(&huart2, &temp, 1);
     }
 }
 
@@ -99,16 +106,24 @@ void command_parser_fsm() {
 
     while (read_index != index_buffer) {
         uint8_t char_rx = buffer[read_index++];
-
         if (read_index == MAX_BUFFER_SIZE) read_index = 0;
+
+        if (char_rx == 8 || char_rx == 127) {
+            if (parser_state == PARSER_RECEIVING && cmd_index > 0) {
+                cmd_index--;
+            }
+            continue;
+        }
+
+        if (char_rx == '!') {
+            cmd_index = 0;
+            cmd_buffer[cmd_index++] = char_rx;
+            parser_state = PARSER_RECEIVING;
+            continue;
+        }
 
         switch(parser_state) {
             case PARSER_IDLE:
-                if (char_rx == '!') {
-                    cmd_index = 0;
-                    cmd_buffer[cmd_index++] = char_rx;
-                    parser_state = PARSER_RECEIVING;
-                }
                 break;
 
             case PARSER_RECEIVING:
@@ -119,14 +134,19 @@ void command_parser_fsm() {
 
                     if (strcmp(cmd_buffer, "!RST#") == 0) {
                         command_flag = 1;
+                        parser_state = PARSER_IDLE;
                     }
                     else if (strcmp(cmd_buffer, "!OK#") == 0) {
                         command_flag = 2;
+                        parser_state = PARSER_IDLE;
                     }
-                    parser_state = PARSER_IDLE;
+                    else {
+//                    	parser_state = PARSER_IDLE;
+                    }
                 }
-                else if (cmd_index >= MAX_BUFFER_SIZE) {
+                else if (cmd_index >= MAX_BUFFER_SIZE - 1) {
                     parser_state = PARSER_IDLE;
+                    cmd_index = 0;
                 }
                 break;
         }
@@ -141,12 +161,11 @@ void uart_communiation_fsm() {
 
                 last_adc_value = HAL_ADC_GetValue(&hadc1);
 
-                sprintf(str_tx, "$!ADC=%d#", (int)last_adc_value);
+                sprintf(str_tx, "!ADC=%d#\r\n", (int)last_adc_value);
 
                 HAL_UART_Transmit(&huart2, (uint8_t*)str_tx, strlen(str_tx), 1000);
 
                 timer_start_time = HAL_GetTick();
-
                 uart_state = UART_WAIT_OK;
             }
             break;
@@ -158,7 +177,7 @@ void uart_communiation_fsm() {
             }
 
             if (HAL_GetTick() - timer_start_time > 3000) {
-                sprintf(str_tx, "$!ADC=%d#", (int)last_adc_value);
+            	sprintf(str_tx, "!ADC=%d#\r\n", (int)last_adc_value);
                 HAL_UART_Transmit(&huart2, (uint8_t*)str_tx, strlen(str_tx), 1000);
 
                 timer_start_time = HAL_GetTick();
@@ -202,7 +221,7 @@ int main(void)
   HAL_ADC_Start(&hadc1);
   HAL_UART_Receive_IT(&huart2, &temp, 1);
   /* USER CODE END 2 */
-
+  uint32_t led_timer = HAL_GetTick();
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
@@ -213,8 +232,10 @@ int main(void)
 	  }
 	  uart_communiation_fsm();
 
-	  HAL_GPIO_TogglePin(LED_RED_GPIO_Port, LED_RED_Pin);
-	  HAL_Delay(500);
+	  if (HAL_GetTick() - led_timer >= 500) {
+		  HAL_GPIO_TogglePin(LED_RED_GPIO_Port, LED_RED_Pin);
+		  led_timer = HAL_GetTick();
+	  }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
