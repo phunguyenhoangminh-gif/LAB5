@@ -171,18 +171,25 @@ void uart_communiation_fsm() {
             break;
 
         case UART_WAIT_OK:
-            if (command_flag == 2) {
-                command_flag = 0;
-                uart_state = UART_IDLE;
-            }
+        	if (command_flag == 1) {
+				command_flag = 0;
+				last_adc_value = HAL_ADC_GetValue(&hadc1);
+				sprintf(str_tx, "!ADC=%d#\r\n", (int)last_adc_value);
+				HAL_UART_Transmit(&huart2, (uint8_t*)str_tx, strlen(str_tx), 1000);
+				timer_start_time = HAL_GetTick();
+			}
 
-            if (HAL_GetTick() - timer_start_time > 3000) {
-            	sprintf(str_tx, "!ADC=%d#\r\n", (int)last_adc_value);
-                HAL_UART_Transmit(&huart2, (uint8_t*)str_tx, strlen(str_tx), 1000);
+			if (command_flag == 2) {
+				command_flag = 0;
+				uart_state = UART_IDLE;
+			}
 
-                timer_start_time = HAL_GetTick();
-            }
-            break;
+			if (HAL_GetTick() - timer_start_time > 3000) {
+				sprintf(str_tx, "!ADC=%d#\r\n", (int)last_adc_value);
+				HAL_UART_Transmit(&huart2, (uint8_t*)str_tx, strlen(str_tx), 1000);
+				timer_start_time = HAL_GetTick();
+			}
+			break;
     }
 }
 /* USER CODE END 0 */
